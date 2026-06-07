@@ -617,7 +617,7 @@ static uint32_t  s_pcm_pos = 0;        // next byte to read from the resource
 static bool      s_pcm_loop = false;
 static bool      s_pcm_active = false;
 static AppTimer *s_pcm_timer = NULL;
-static uint8_t   s_pcm_buf[PCM_CHUNK];
+static uint8_t   s_pcm_buf[PCM_CHUNK] __attribute__((aligned(4)));
 static uint32_t  s_pcm_have = 0;       // valid bytes in s_pcm_buf
 static uint32_t  s_pcm_sent = 0;       // bytes of s_pcm_buf already written
 
@@ -645,6 +645,15 @@ static void pcm_pump(void *ctx) {
       uint32_t want = s_pcm_size - s_pcm_pos;
       if (want > PCM_CHUNK) want = PCM_CHUNK;
       resource_load_byte_range(s_pcm_res, s_pcm_pos, s_pcm_buf, want);
+      // The stream's open-time volume is a no-op for PCM, so attenuate the
+      // 16-bit samples in software according to the user's setting.
+      uint8_t vol = s_cfg.chime_volume;
+      if (vol < 100) {
+        int16_t *smp = (int16_t *)s_pcm_buf;
+        for (uint32_t i = 0, cnt = want / 2; i < cnt; i++) {
+          smp[i] = (int16_t)((int32_t)smp[i] * vol / 100);
+        }
+      }
       s_pcm_have = want; s_pcm_sent = 0; s_pcm_pos += want;
     }
     uint32_t n = speaker_stream_write(s_pcm_buf + s_pcm_sent, s_pcm_have - s_pcm_sent);
@@ -662,7 +671,7 @@ static void casio_chime_play(bool loop) {
   }
   if (s_pcm_size == 0) return;
   casio_chime_stop();                             // restart cleanly if already playing
-  if (!speaker_stream_open(SpeakerPcmFormat_16kHz_16bit, s_cfg.chime_volume)) return;
+  if (!speaker_stream_open(SpeakerPcmFormat_16kHz_16bit, 100)) return;  // attenuated in software
   s_pcm_pos = s_pcm_have = s_pcm_sent = 0;
   s_pcm_loop = loop;
   s_pcm_active = true;
