@@ -31,7 +31,7 @@ module.exports = [
         min: 0,
         max: 100,
         step: 10,
-        description: "Volume of the hourly chime and alarm beep. Speaker models only (Pebble 2 Duo, Pebble Time 2)."
+        description: "Volume of the hourly chime and alarm beep."
       }
     ]
   },
