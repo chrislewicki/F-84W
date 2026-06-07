@@ -1,0 +1,43 @@
+{
+  "name": "F-84W",
+  "author": "Chris Lewicki",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {
+    "pebble-clay": "^1.0.4"
+  },
+  "pebble": {
+    "displayName": "F-84W",
+    "uuid": "3417487d-7889-48cc-b5b6-66268a88b248",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": [
+      "SHOW_SECONDS",
+      "HOURLY_VIBE",
+      "HOURLY_CHIME",
+      "ALARM_ENABLED",
+      "ALARM_TIME",
+      "ALARM_VIBE",
+      "ALARM_CHIME",
+      "CHIME_VOLUME"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "raw",
+          "name": "BEEP_BEEP",
+          "file": "beep-beep.pcm"
+        }
+      ]
+    }
+  }
+}
