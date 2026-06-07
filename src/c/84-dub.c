@@ -64,7 +64,6 @@ static const uint8_t kSeg[10] = {
   0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F
 };
 
-static const char *kDays[7] = { "SU", "MO", "TU", "WE", "TH", "FR", "SA" };
 
 // Horizontal segment: a flattened hexagon `len` wide and `t` thick.
 static void fill_hseg(GContext *ctx, int x, int y, int len, int t) {
@@ -179,66 +178,78 @@ static void draw_2digit(GContext *ctx, int x, int y, int w, int h, int t, int vt
   draw_digit(ctx, x + w + gap, y, w, h, t, vt, d1, on, ghost, ghosts);
 }
 
-// ---- fourteen-segment letters --------------------------------------------
-// Segment order: a b c d e f g1 g2 h i j k l m  (outer, two middles, 4 diags,
-// 2 centre verticals). Drawn as thick strokes - crisp enough for short words.
-enum { LA,LB,LC,LD,LE,LF,LG1,LG2,LH,LI,LJ,LK,LL,LM };
+// ---- day-of-week (fixed two-cell segment display, like the real F-91W) -----
+// Each cell is a 7-segment frame plus the watch's dedicated extras: the LEFT
+// cell adds upper/lower CENTRE verticals (M stem, T stem, W centre peak); the
+// RIGHT cell adds an upper-left diagonal spur that turns the 'A' frame into 'R'.
+// So a day lights only its own segments and the ghost shows just that cell's
+// dedicated set -- not the busy union of a general 14-segment cell.
+#define DA 0x001  // top
+#define DB 0x002  // top-right
+#define DC 0x004  // bottom-right
+#define DD 0x008  // bottom
+#define DE 0x010  // bottom-left
+#define DF 0x020  // top-left
+#define DG 0x040  // middle
+#define DI 0x080  // upper-centre vertical (left cell)
+#define DJ 0x100  // lower-centre vertical (left cell)
+#define DK 0x200  // upper-left diagonal spur (right cell, R)
 
-#define B(s) (1 << (s))
-static uint16_t letter_mask(char ch) {
-  switch (ch) {
-    case 'A': return B(LA)|B(LB)|B(LC)|B(LE)|B(LF)|B(LG1)|B(LG2);
-    case 'E': return B(LA)|B(LD)|B(LE)|B(LF)|B(LG1)|B(LG2);
-    case 'F': return B(LA)|B(LE)|B(LF)|B(LG1)|B(LG2);
-    case 'H': return B(LB)|B(LC)|B(LE)|B(LF)|B(LG1)|B(LG2);
-    case 'M': return B(LB)|B(LC)|B(LE)|B(LF)|B(LH)|B(LJ);
-    case 'O': return B(LA)|B(LB)|B(LC)|B(LD)|B(LE)|B(LF);
-    case 'P': return B(LA)|B(LB)|B(LE)|B(LF)|B(LG1)|B(LG2);
-    case 'R': return B(LA)|B(LB)|B(LE)|B(LF)|B(LG1)|B(LG2)|B(LK);
-    case 'S': return B(LA)|B(LC)|B(LD)|B(LF)|B(LG1)|B(LG2);
-    case 'T': return B(LA)|B(LI)|B(LL);
-    case 'U': return B(LB)|B(LC)|B(LD)|B(LE)|B(LF);
-    case 'W': return B(LB)|B(LC)|B(LE)|B(LF)|B(LK)|B(LM);
-    default:  return 0;
-  }
-}
-#undef B
+#define DAY_GHOST_L (DA|DB|DC|DD|DE|DF|DG|DI|DJ)
+#define DAY_GHOST_R (DA|DB|DC|DD|DE|DF|DG|DK)
 
-// Draw a line shortened by `g` at each end (so neighbouring 14-seg strokes
-// don't touch -- gives the small inter-segment gaps of a real LCD).
-static void seg_line(GContext *ctx, GPoint a, GPoint b, int g) {
+// Per-day {left cell, right cell} masks, indexed by tm_wday (0 = Sunday).
+static const uint16_t kDayMask[7][2] = {
+  { DA|DF|DG|DC|DD,        DB|DC|DD|DE|DF },          // SU :  S  U
+  { DA|DF|DE|DB|DC|DI,     DA|DB|DC|DD|DE|DF },       // MO :  M  O
+  { DA|DI|DJ,              DB|DC|DD|DE|DF },          // TU :  T  U
+  { DE|DF|DB|DC|DD|DJ,     DA|DF|DE|DG|DD },          // WE :  W  E
+  { DA|DI|DJ,              DF|DE|DB|DC|DG },          // TH :  T  H
+  { DA|DF|DE|DG,           DA|DB|DC|DE|DF|DG|DK },    // FR :  F  R
+  { DA|DF|DG|DC|DD,        DA|DB|DC|DE|DF|DG },       // SA :  S  A
+};
+
+// Draw a stroke shortened by `g` at each end (the small LCD inter-segment gap).
+static void day_line(GContext *ctx, GPoint a, GPoint b, int g) {
   int sx = (b.x > a.x) - (b.x < a.x);
   int sy = (b.y > a.y) - (b.y < a.y);
   graphics_draw_line(ctx, GPoint(a.x + sx * g, a.y + sy * g),
                           GPoint(b.x - sx * g, b.y - sy * g));
 }
 
-static void draw_letter(GContext *ctx, int x, int y, int w, int h, int t,
-                        char ch, GColor on, GColor ghost, bool ghosts) {
-  uint16_t m = letter_mask(ch);
-  int x2 = x + w / 2, xr = x + w;
-  int y2 = y + h / 2, yb = y + h;
-  GPoint TL = {x, y},  TC = {x2, y},  TR = {xr, y};
-  GPoint ML = {x, y2}, CC = {x2, y2}, MR = {xr, y2};
-  GPoint BL = {x, yb}, BC = {x2, yb}, BR = {xr, yb};
-  GPoint A[14] = { TL, TR, MR, BL, ML, TL, ML, CC, TL, TC, TR, BR, BC, BL };
-  GPoint B[14] = { TR, MR, BR, BR, BL, ML, CC, MR, CC, CC, CC, CC, CC, CC };
+static void draw_day_cell(GContext *ctx, int x, int y, int w, int h, int t,
+                          uint16_t lit, uint16_t ghostm,
+                          GColor on, GColor ghost, bool ghosts) {
+  int xr = x + w, xc = x + w / 2, ym = y + h / 2, yb = y + h;
+  // R-spur: a flat horizontal nub at the top-left corner that sticks straight
+  // out to the left (level with the top bar), not angled into the letter.
+  GPoint k0 = { x, y }, k1 = { x - w * 3 / 5, y };
+  struct { uint16_t bit; GPoint a, b; } seg[] = {
+    { DA, {x, y},   {xr, y}  }, { DB, {xr, y},  {xr, ym} },
+    { DC, {xr, ym}, {xr, yb} }, { DD, {x, yb},  {xr, yb} },
+    { DE, {x, ym},  {x, yb}  }, { DF, {x, y},   {x, ym}  },
+    { DG, {x, ym},  {xr, ym} }, { DI, {xc, y},  {xc, ym} },
+    { DJ, {xc, ym}, {xc, yb} }, { DK, k0,       k1       },
+  };
   graphics_context_set_stroke_width(ctx, t);
-  for (int i = 0; i < 14; i++) {
-    bool lit = m & (1 << i);
-    if (!lit && !ghosts) continue;
-    graphics_context_set_stroke_color(ctx, lit ? on : ghost);
-    seg_line(ctx, A[i], B[i], 1);
+  // Two passes: ghosts first, then lit on top, so lit bars never get notched by
+  // a ghost segment crossing them.
+  for (int pass = 0; pass < 2; pass++) {
+    graphics_context_set_stroke_color(ctx, pass ? on : ghost);
+    for (unsigned i = 0; i < sizeof(seg) / sizeof(seg[0]); i++) {
+      bool is_on = lit & seg[i].bit;
+      bool draw = pass ? is_on : (ghosts && !is_on && (ghostm & seg[i].bit));
+      if (draw) day_line(ctx, seg[i].a, seg[i].b, 1);
+    }
   }
   graphics_context_set_stroke_width(ctx, 1);
 }
 
-static int draw_word(GContext *ctx, int x, int y, int w, int h, int t,
-                     int gap, const char *s, GColor on, GColor ghost, bool ghosts) {
-  for (int i = 0; s[i]; i++) {
-    draw_letter(ctx, x + i * (w + gap), y, w, h, t, s[i], on, ghost, ghosts);
-  }
-  return x;
+static void draw_day(GContext *ctx, int x, int y, int w, int h, int t, int gap,
+                     int wday, GColor on, GColor ghost, bool ghosts) {
+  if (wday < 0 || wday > 6) return;
+  draw_day_cell(ctx, x, y, w, h, t, kDayMask[wday][0], DAY_GHOST_L, on, ghost, ghosts);
+  draw_day_cell(ctx, x + w + gap, y, w, h, t, kDayMask[wday][1], DAY_GHOST_R, on, ghost, ghosts);
 }
 
 // ---- misc helpers ---------------------------------------------------------
@@ -532,8 +543,8 @@ static void draw_lcd(GContext *ctx, GRect b) {
   int lw = lh * 58 / 100;
   int lt = lh * 14 / 100; if (lt < 2) lt = 2;
   int lgap = lw; if (lgap < 4) lgap = 4;   // space between day letters
-  draw_word(ctx, gx + lcd_w * 36 / 100, drow_y, lw, lh, lt, lgap,
-            kDays[t->tm_wday], c_lcdfg, c_ghost, false);
+  draw_day(ctx, gx + lcd_w * 36 / 100, drow_y, lw, lh, lt, lgap,
+           t->tm_wday, c_lcdfg, c_ghost, true);
 
   int dh_date = lcd_h * 20 / 100 + 2;   // date a hair larger than the day-of-week
   int dw_date = dh_date * 55 / 100;
